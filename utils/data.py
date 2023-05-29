@@ -1,26 +1,57 @@
-import io 
-import json 
+import os 
 import datasets
 import pandas as pd 
-
-
-def _make_r_io_base(f, mode: str):
-    if not isinstance(f, io.IOBase):
-        f = open(f, mode=mode)
-    return f
-
-
-def jload(f, mode="r"):
-    """Load a .json file into a dictionary."""
-    f = _make_r_io_base(f, mode)
-    jdict = json.load(f)
-    f.close()
-    return jdict
+from .utils import jload 
+from .preprocess import SFTDataset, DataCollatorForSFTDataset
+from .preprocess import BinaryRewardModelingDataset, DataCollatorForBinaryRewardModelingDataset, split_train_into_train_and_eval
 
 
 def make_supervised_data(
     tokenizer,
-    train_path,
-    val_path,
+    data_path,
 ):
-    return tokenizer 
+    prompt_dict = jload(os.path.join(data_path, 'prompt.json')) 
+    train_data = datasets.load_dataset("json", data_files=os.path.join(data_path, 'sft.json'))
+    eval_data = datasets.load_dataset("json", data_files=os.path.join(data_path, 'val.json')) 
+    
+    train_df = pd.concat([pd.DataFrame(train_data)]) 
+    eval_df = pd.concat([pd.DataFrame(eval_data)]) 
+
+    train_dataset = SFTDataset(
+        df=train_df,
+        prompt_dict=prompt_dict,
+        tokenizer=tokenizer,
+    )
+    eval_dataset = SFTDataset(
+        df=eval_df,
+        prompt_dict=prompt_dict,
+        tokenizer=tokenizer,
+    )
+
+    data_collator = DataCollatorForSFTDataset(tokenizer=tokenizer) 
+    return dict(train_dataset=train_dataset, eval_dataset=eval_dataset, data_collator=data_collator)
+
+
+def make_binary_reward_modeling_data(
+    tokenizer, 
+    data_path,
+): 
+    prompt_dict = jload(os.path.join(data_path, 'prompt.json'))  
+    human_preference = datasets.load_dataset("json", data_files=os.path.join(data_path, 'gpt4_preference.json')) 
+    train_df = pd.DataFrame(human_preference)
+
+    train_dataset = BinaryRewardModelingDataset(
+        df=train_df,
+        prompt_dict=prompt_dict,
+        tokenizer=tokenizer,
+        end_sequence_with_eos=False,
+    )
+    train_dataset, eval_dataset = split_train_into_train_and_eval(
+        train_dataset=train_dataset,
+        eval_size=500,
+        seed=2023,
+    )
+    data_collator = DataCollatorForBinaryRewardModelingDataset(tokenizer=tokenizer)
+    return dict(train_dataset=train_dataset, eval_dataset=eval_dataset, data_collator=data_collator)
+
+
