@@ -1,7 +1,8 @@
 import transformers 
 import torch 
 import dataclasses
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset 
+import torch.nn.functional as F
 import pandas as pd
 from typing import Callable, Dict, Optional, Sequence, Union 
 import copy 
@@ -392,3 +393,75 @@ class DataCollatorForBinaryRewardModelingDataset(object):
             index_1=index_1,
             choice=choice,
         )
+
+
+
+def pad(inputs, target_size: Union[torch.Size, Sequence[int]], value=0.0, left=True):
+    current_size = inputs.size()
+    diffs = tuple(ti - ci for ti, ci in zip_(target_size, current_size))
+    pad_params = []
+    for diff in diffs:
+        pad_params = ([diff, 0] if left else [0, diff]) + pad_params
+    res = F.pad(inputs, pad=pad_params, value=value)
+    return res
+
+
+def left_pad(inputs, target_size: Union[torch.Size, Sequence[int]], value=0.0):
+    return pad(inputs=inputs, target_size=target_size, value=value, left=True)
+
+
+class QueryResponseDataset(Dataset):
+    """Dataset that emits tokenized left-padded queries."""
+
+    def __init__(
+        self,
+        df: pd.DataFrame,
+        prompt_dict: dict,
+        tokenizer: transformers.PreTrainedTokenizer,
+        query_len: int,
+        df_postprocessor: Optional[Callable] = None,
+    ):
+        super(QueryResponseDataset, self).__init__()
+
+        if df_postprocessor is not None:
+            df = df_postprocessor(df)
+        list_dict_data = df.to_dict(orient="records")
+
+        # prompts are strings; queries are tensors.
+        prompts = [format_prompt(example=dict_data, prompt_dict=prompt_dict) for dict_data in list_dict_data]
+        queries = [
+            tokenizer(prompt, return_tensors="pt", truncation=False).input_ids.squeeze(dim=0) for prompt in prompts
+        ]
+
+        filtered_queries = [query for query in queries if len(query) <= query_len]
+        print(
+            f"Filtered out {len(queries) - len(filtered_queries)} instances out of {len(queries)} that "
+            f"exceed length limit. These examples are not used for training, but will still be used in evaluation. "
+        )
+
+        queries = torch.stack(
+            [
+                left_pad(query, target_size=(query_len,), value=tokenizer.pad_token_id)
+                for query in filtered_queries
+            ]
+        )
+
+        self.queries = queries
+        self.query_attn_masks = queries.ne(tokenizer.pad_token_id).long()
+
+        # Auxiliary data.
+        self.prompts = prompts
+        self.list_dict_data = list_dict_data
+
+    def __getitem__(self, i):
+        return_dict = dict(queries=self.queries[i], query_attn_masks=self.query_attn_masks[i])
+        return return_dict
+
+    def __len__(self):
+        return len(self.queries)
+
+
+@dataclasses.dataclass
+class DataCollatorForQueryResponseDataset(object):
+    def __call__(self, instances: Sequence[Dict]):
+        return {key: torch.stack([instance[key] for instance in instances]) for key in instances[0].keys()}
