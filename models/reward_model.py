@@ -5,7 +5,8 @@ from transformers.utils.generic import ModelOutput
 from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Union
 
 
-def get_transformer_hidden_size(model: transformers.PreTrainedModel):
+def get_transformer_hidden_size(model: transformers.PreTrainedModel): 
+    return getattr(model.config, "n_embd")
     if isinstance(model, transformers.GPT2LMHeadModel):
         hidden_size_attr_name = "n_embd"
     elif isinstance(model, transformers.OPTForCausalLM):
@@ -45,12 +46,13 @@ class RewardModel(transformers.PreTrainedModel):
 
     def __init__(self, config: RewardConfig, **kwargs):
         super(RewardModel, self).__init__(config) 
-        self.backbone_model = transformers.AutoModelForCausalLM.from_pretrained(config.backbone_model_name_or_path)
+        # self.backbone_model = transformers.AutoModelForCausalLM.from_pretrained(config.backbone_model_name_or_path)
+        self.backbone_model = transformers.AutoModel.from_pretrained('./sft')
         hidden_size = get_transformer_hidden_size(self.backbone_model)
         reward_head = nn.Linear(hidden_size, 1)
         torch.nn.init.zeros_(reward_head.bias)
         self.reward_head = reward_head.to(next(self.backbone_model.parameters()).device)
-
+    
     def forward(self, input_ids, attention_mask=None, return_dict=True, **kwargs):
         # We only compute the rewards and don't compute the logistic regression loss in this function so that it's
         # easier to use for later stages of reranking / RL training.

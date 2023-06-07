@@ -83,7 +83,7 @@ def main():
         **data_module,
     )
     trainer.train() 
-    trainer.save_state() 
+    trainer.save_model('sft') 
 
 if __name__ == "__main__":
     main() 

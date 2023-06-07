@@ -104,8 +104,7 @@ def main():
     trainer.train() 
     trainer.evaluate() 
 
-    trainer.save_state() 
-
+    trainer.save_model('reward')
 
 
 if __name__ == "__main__":

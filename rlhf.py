@@ -14,14 +14,13 @@ import torch
 from models import RLHFTrainer 
 import accelerate
 from accelerate import DistributedDataParallelKwargs
-
+from transformers.training_args import OptimizerNames
 
 class MyAccelerator(accelerate.Accelerator):
     """Thin wrapper for accelerate.Accelerator."""
 
     def __repr__(self):
         return (
-            f"Accelerator(\n"
             f"  state={self.state}, \n"
             f"  gradient_accumulation_steps={self.gradient_accumulation_steps:.6f}, \n"
             f"  split_batches={self.split_batches}, \n"
@@ -35,8 +34,9 @@ class MyAccelerator(accelerate.Accelerator):
 
 @dataclass
 class TrainingArguments(transformers.TrainingArguments):
+    wandb_project: str = field(default="rlhf")
     flash_attn: bool = field(default=False)
-    optim: str = field(default="adamw_torch")
+    optim: str = field(default=OptimizerNames.ADAMW_HF) #"adamw_torch")
     truncate_tokens: Optional[List[str]] = field(
         default_factory=lambda: None,
         metadata={
@@ -57,6 +57,7 @@ class TrainingArguments(transformers.TrainingArguments):
     total_epochs: int = field(default=10)
     rollout_batch_size: int = field(default=512)
     step_batch_size: int = field(default=256)
+    rollout_accumulation_steps: int = field(default=16)
     rollout_per_device_batch_size: int = field(default=32)
     step_per_device_batch_size: int = field(default=2)
     noptepochs: int = field(default=2)
@@ -129,24 +130,29 @@ class TrainingArguments(transformers.TrainingArguments):
 
 
 def main(): 
-    ckpt_path = './ckpt' 
+    policy_ckpt_path = './sft' 
+    reward_ckpt_path = './reward'
     data_path = './data'
     parser = transformers.HfArgumentParser(TrainingArguments) 
     training_args = parser.parse_args_into_dataclasses()[0] 
     print(training_args)
 
-    tokenizer = AutoTokenizer.from_pretrained(ckpt_path, padding_side="left")
+    tokenizer = AutoTokenizer.from_pretrained(policy_ckpt_path, padding_side="left")
     if tokenizer.pad_token is None:
         tokenizer.add_special_tokens(dict(pad_token=constants.DEFAULT_PAD_TOKEN)) 
     
-    policy = make_policy_with_base_model(training_args, AutoModelForCausalLM.from_pretrained(ckpt_path), tokenizer) 
-    value_model = make_value_with_base_model(training_args, RewardModel.from_pretrained(ckpt_path), tokenizer) 
+    policy = make_policy_with_base_model(training_args, AutoModelForCausalLM.from_pretrained(policy_ckpt_path), tokenizer) 
+    value_model = make_value_with_base_model(training_args, RewardModel.from_pretrained(reward_ckpt_path), tokenizer) 
+    policy.train() 
+    value_model.train()
     actor_critic = ActorCritic(policy=policy, value_model=value_model) 
 
-    ref_policy = make_policy_with_base_model(training_args, AutoModelForCausalLM.from_pretrained(ckpt_path), tokenizer) 
+    ref_policy = make_policy_with_base_model(training_args, AutoModelForCausalLM.from_pretrained(policy_ckpt_path), tokenizer) 
+    ref_policy = ref_policy.to(torch.device('cuda'))
     ref_policy.requires_grad_(False) 
 
-    reward_model = RewardModel.from_pretrained(ckpt_path) 
+    reward_model = RewardModel.from_pretrained(reward_ckpt_path)  
+    reward_model = reward_model.to(torch.device('cuda'))
     reward_model.requires_grad_(False) 
     model_module = dict(policy=actor_critic, ref_policy=ref_policy, reward_model=reward_model)
 
@@ -154,25 +160,28 @@ def main():
         tokenizer=tokenizer, 
         data_path=data_path,
     )
-
+    
+    """
     accelerator = MyAccelerator(
         gradient_accumulation_steps=training_args.gradient_accumulation_steps,
         log_with=["tensorboard"],
-        even_batches=True,  # Make sure the batch size on each device is the same.
+        logging_dir='./save',
+        # even_batches=True,  # Make sure the batch size on each device is the same.
         split_batches=False,  # Don't break a batch into smaller chunks.
         step_scheduler_with_optimizer=False,  # Untie optimizer and scheduler step.
         # Value model might not use all parameters (e.g., lm-head) in the forward pass.
         kwargs_handlers=[DistributedDataParallelKwargs(find_unused_parameters=True)],
     )
     accelerator.init_trackers(
-        # training_args.wandb_project,
-        # init_kwargs={"wandb": {"name": training_args.run_name}},
+        training_args.wandb_project,
+        init_kwargs={"wandb": {"name": training_args.run_name}},
         config=training_args.__dict__,
     )
-
+    """
+    training_args.report_to = ['tensorboard']
     trainer = RLHFTrainer(
         args=training_args,
-        accelerator=accelerator,
+        accelerator=None,
         **data_module,
         **model_module,
         tokenizer=tokenizer,

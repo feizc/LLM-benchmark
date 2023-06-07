@@ -1,7 +1,7 @@
 python sft.py --output_dir './save' \
     --seed 2023 \
     --fp16 False \
-    --bf16 True \
+    --bf16 False \
     --num_train_epochs 3 \
     --per_device_train_batch_size 1 \
     --per_device_eval_batch_size 4 \
