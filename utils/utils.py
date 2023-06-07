@@ -68,16 +68,20 @@ def stable_resize_token_embeddings(
     # This can happen when there's multiple-of-64 padding.
     if num_new_tokens > 0:
         input_embeddings = model.get_input_embeddings().weight.data
-        output_embeddings = model.get_output_embeddings().weight.data
+        flag = model.get_output_embeddings() 
+        if flag is not None:
+            output_embeddings = model.get_output_embeddings().weight.data
 
         input_embeddings_avg = input_embeddings[:-num_new_tokens].mean(
             dim=0, keepdim=True
         )
-        output_embeddings_avg = output_embeddings[:-num_new_tokens].mean(
-            dim=0, keepdim=True
-        )
+        if flag is not None:
+            output_embeddings_avg = output_embeddings[:-num_new_tokens].mean(
+                dim=0, keepdim=True
+            )
 
         input_embeddings[-num_new_tokens:] = input_embeddings_avg
-        output_embeddings[-num_new_tokens:] = output_embeddings_avg
+        if flag is not None:
+            output_embeddings[-num_new_tokens:] = output_embeddings_avg
 
 

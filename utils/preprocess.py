@@ -50,7 +50,8 @@ def format_output(example: dict, eos_token: Optional[str] = None, output_key="ou
 def _tokenize_fn(strings: Sequence[str], tokenizer: transformers.PreTrainedTokenizer) -> dict:
     """Tokenize a list of strings and return the tokenized content as well metadata (e.g., truncation statistics)."""
     padding = getattr(tokenizer, "padding", "max_length")
-    return_overflowing_tokens = transformers.__version__ <= "4.26.1"
+    #return_overflowing_tokens = transformers.__version__ <= "4.26.1"
+    return_overflowing_tokens = False 
     # TODO(lxuechen): Until HF supports fast tokenizer for OPT, we can't make a joint call on the list of strings
     #  when `return_overflowing_tokens=True`.
     tokenized_list = [
@@ -110,7 +111,7 @@ def preprocess_for_sft(
     tokenizer: transformers.PreTrainedTokenizer,
     df_postprocessor=None,
     verbose=True,
-) -> dict[str, Union[torch.Tensor, Sequence[torch.Tensor]]]:
+):    
     """Tokenize each example and create the labels.
 
     Args:
@@ -200,7 +201,7 @@ def _get_generator(seed: int) -> torch.Generator:
     return rng
 
 
-def split_train_into_train_and_eval(train_dataset: Dataset, eval_size: int, seed: int) -> tuple[Dataset, Dataset]:
+def split_train_into_train_and_eval(train_dataset: Dataset, eval_size: int, seed: int):
     assert eval_size < len(
         train_dataset  # noqa
     ), "Requested eval_size cannot be equal/larger than original train data size."
@@ -218,7 +219,7 @@ def preprocess_for_reward_modeling(
     df_postprocessor: Optional[Callable] = None,
     end_sequence_with_eos: bool = False,
     verbose=True,
-) -> dict[str, torch.Tensor]:
+):   
     if df_postprocessor is not None:
         df = df_postprocessor(df)
     list_dict_data = df.to_dict(orient="records")
